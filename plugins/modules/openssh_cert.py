@@ -63,7 +63,7 @@ options:
             - When V(partial_idempotence) an existing certificate will be regenerated based on
               O(serial_number), O(signature_algorithm), O(type), O(valid_from), O(valid_to), O(valid_at), and O(principals).
               O(valid_from) and O(valid_to) can be excluded by O(ignore_timestamps=true).
-            - When V(full_idempotence) O(identifier), O(options), O(public_key), and O(signing_key)
+            - When V(full_idempotence) O(identifier), O(options), O(public_key), and O(signing_key) or O(signing_string)
               are also considered when compared against an existing certificate.
             - V(always) is equivalent to O(force=true).
         type: str
@@ -99,7 +99,12 @@ options:
         description:
             - The path to the private openssh key that is used for signing the public key in order to generate the certificate.
             - If the private key is on a PKCS#11 token (O(pkcs11_provider)), set this to the path to the public key instead.
-            - Required if O(state) is V(present).
+            - Required if O(state) is V(present) and O(signing_string) is unset.
+        type: path
+    signing_string:
+        description:
+            - The string of a private openssh key that is used for signing the public key in order to generate the certificate.
+            - Required if O(state) is V(present) and O(signing_key) is unset.
         type: path
     pkcs11_provider:
         description:
@@ -204,6 +209,15 @@ EXAMPLES = '''
   community.crypto.openssh_cert:
     type: user
     signing_key: /path/to/private_key
+    public_key: /path/to/public_key.pub
+    path: /path/to/certificate
+    valid_from: always
+    valid_to: forever
+
+- name: Generate an OpenSSH user certificate that is valid forever and for all users using the signing key as string
+  community.crypto.openssh_cert:
+    type: user
+    signing_string: "{{ signing_string }}"
     public_key: /path/to/public_key.pub
     path: /path/to/certificate
     valid_from: always
@@ -321,6 +335,7 @@ class Certificate(OpensshModule):
         self.serial_number = self.module.params['serial_number']
         self.signature_algorithm = self.module.params['signature_algorithm']
         self.signing_key = self.module.params['signing_key']
+        self.signing_string = self.module.params['signing_string']
         self.state = self.module.params['state']
         self.type = self.module.params['type']
         self.use_agent = self.module.params['use_agent']
@@ -479,10 +494,17 @@ class Certificate(OpensshModule):
             self.module.fail_json(msg="Unable to stage temporary key: %s" % to_native(e))
         self.module.add_cleanup_file(key_copy)
 
+        if self.signing_key:
+            signing_key_path = self.signing_key
+        else:
+            f = NamedTemporaryFile()
+            f.write(self.signing_string)
+            signing_key_path = f.name
+
         self.ssh_keygen.generate_certificate(
             key_copy, self.identifier, self.options, self.pkcs11_provider, self.principals, self.serial_number,
-            self.signature_algorithm, self.signing_key, self.type, self.time_parameters, self.use_agent,
-            environ_update=dict(TZ="UTC"), check_rc=True
+            self.signature_algorithm, signing_key_path, self.type, self.time_parameters, self.use_agent,
+            environ_update=dict(TZ="UTC"), check_rc=True,
         )
 
         temp_cert = os.path.splitext(key_copy)[0] + '-cert.pub'
@@ -566,6 +588,7 @@ def main():
             ),
             signature_algorithm=dict(type='str', choices=['ssh-rsa', 'rsa-sha2-256', 'rsa-sha2-512']),
             signing_key=dict(type='path'),
+            signing_string=dict(type='str'),
             serial_number=dict(type='int'),
             state=dict(type='str', default='present', choices=['absent', 'present']),
             type=dict(type='str', choices=['host', 'user']),
@@ -577,7 +600,11 @@ def main():
         ),
         supports_check_mode=True,
         add_file_common_args=True,
-        required_if=[('state', 'present', ['type', 'signing_key', 'public_key', 'valid_from', 'valid_to'])],
+        required_if=[
+            ('state', 'present', ['type', 'public_key', 'valid_from', 'valid_to']),
+            ('state', 'present', ['signing_key', 'signing_string'], True),
+        ],
+        mutually_exclusive=[('signing_key', 'signing_string')],
     )
 
     Certificate(module).execute()
