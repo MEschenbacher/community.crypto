@@ -89,11 +89,8 @@ options:
             - "Note: OpenSSH versions prior to 7.2 do not support SHA-2 signature algorithms for RSA keys and OpenSSH
                versions prior to 7.3 do not support SHA-2 signature algorithms for certificates."
             - See U(https://www.openssh.com/txt/release-8.2) for more information.
+            - Use ssh -Q key-ca-sign to see a list of choices.
         type: str
-        choices:
-            - ssh-rsa
-            - rsa-sha2-256
-            - rsa-sha2-512
         version_added: 1.10.0
     signing_key:
         description:
@@ -564,7 +561,7 @@ def main():
                 default='partial_idempotence',
                 choices=['never', 'fail', 'partial_idempotence', 'full_idempotence', 'always']
             ),
-            signature_algorithm=dict(type='str', choices=['ssh-rsa', 'rsa-sha2-256', 'rsa-sha2-512']),
+            signature_algorithm=dict(type='str'),
             signing_key=dict(type='path'),
             serial_number=dict(type='int'),
             state=dict(type='str', default='present', choices=['absent', 'present']),
